@@ -1,0 +1,496 @@
+
+
+
+seq = 17
+sample.name = "Ct1807_1113_10020395"
+gr = counts_Ct1807_1113_10020395[counts_Ct1807_1113_10020395@seqnames==17]
+A = counts_Ct1807_1113_10020395[counts_Ct1807_1113_10020395@seqnames==17]$Ct1807_1113_10020395
+beta.hat_10020395 = beta.hat
+mu.hat_10020395 = mu.hat
+O.norm_10020395 =O.norm
+
+sample.name = "Ct1807_1113_20020702"
+gr = counts_Ct1807_1113_20020702[counts_Ct1807_1113_20020702@seqnames==17]
+B= counts_Ct1807_1113_20020702[counts_Ct1807_1113_20020702@seqnames==17]$Ct1807_1113_20020702
+beta.hat_20020702 = beta.hat
+mu.hat_20020702 = mu.hat
+O.norm_20020702 =O.norm
+
+sample.name = "Ct1807_1113_20020858"
+counts_Ct1807_1113_20020858 = counts
+gr = counts_Ct1807_1113_20020858[counts_Ct1807_1113_20020858@seqnames==17]
+C= counts_Ct1807_1113_20020858[counts_Ct1807_1113_20020858@seqnames==17]$Ct1807_1113_20020858
+beta.hat_20020858 = beta.hat
+mu.hat_20020858 = mu.hat
+O.norm_20020858 =O.norm
+
+
+sample.name = "Ct1807_1113_CNV_1"
+counts_Ct1807_1113_CNV_1 = counts
+gr = counts_Ct1807_1113_CNV_1[counts_Ct1807_1113_CNV_1@seqnames==17]
+D = counts_Ct1807_1113_CNV_1[counts_Ct1807_1113_CNV_1@seqnames==17]$Ct1807_1113_CNV_1
+beta.hat_CNV_1 = beta.hat
+mu.hat_CNV_1 = mu.hat
+O.norm_CNV_1 =O.norm
+
+
+sample.name = "Ct1807_1113_CNV_2"
+counts_Ct1807_1113_CNV_2 = counts
+gr = counts_Ct1807_1113_CNV_2[counts_Ct1807_1113_CNV_2@seqnames==17]
+E= counts_Ct1807_1113_CNV_2[counts_Ct1807_1113_CNV_2@seqnames==17]$Ct1807_1113_CNV_2
+beta.hat_CNV_2 = beta.hat
+mu.hat_CNV_2 = mu.hat
+O.norm_CNV_2 =O.norm
+
+which(counts@seqnames==17)
+
+O.norm[which(counts@seqnames==17)][12:28] %>% mean()
+O.norm[which(counts@seqnames==17)][12:28] %>% median()
+
+
+
+data_F = data.frame(A,B,C,D,E)
+
+data_beta = data.frame(beta.hat_10020395,beta.hat_20020702)
+apply(data_F, 2, sum)
+
+
+
+
+
+gr = counts
+
+
+ExomeCopy <- function (gr, sample.name, X.names=c("log.bg","GC","GC.sq","width"), Y.names, fit.var = FALSE, 
+                       reltol = 1e-04, S=0:100,d=2, goto.cnv = 1e-04, goto.normal = 1/20, 
+                       init.phi = "norm"){
+  if (!sample.name %in% colnames(mcols(gr))) {
+    stop("sample.name is not a metadata column in gr.")
+  }
+  O <- mcols(gr)[[sample.name]]
+  if (any(O != round(O) | O < 0)) {
+    stop("Sample counts must be non-negative integers")
+  }
+  if (mean(O == 0) > 0.9) {
+    warning("More than 90% of sample counts are zero, exomeCopy will return NULL")
+    return(NULL)
+  }
+  if (any(S!=round(S)|S<0) | any(d!=round(d)|d<0)) {
+    stop("S and d must be non-negative integers")
+  }
+  if (!all(d %in% S)) {
+    stop("The normal state, d, must be one of the possible copy states in S")
+  } 
+  if (!(all(X.names %in% colnames(mcols(gr))))) {
+    stop("all X.names must be columns in gr")
+  }
+  # if (length(seqlevelsInUse(gr)) != 1) {
+  #   stop("The current gr argument has ranges over the following chromosomes: ",paste(seqlevelsInUse(gr),collapse=", "),".\n The gr argument should contain ranges over a single chromosome.\n You can pass exomeCopy a GRanges object with ranges from a single chromosome with this syntax: gr[seqnames(gr) == 'chr1'].\n See vignette for example of running on multiple chromosomes.")
+  # }
+  if (length(gr) < 100) {
+    warning("exomeCopy was tested for thousands of ranges covering a targeted region on a single chromosome.  The results might not be reliable for less than a hundred ranges.")
+  }
+  if (is.unsorted(gr)) {
+    stop("Genomic ranges in gr must be sorted.")
+  }
+  if(T){stFn <- function(par,fx.par,data,nstates) {
+    # this is a quick fix to cap transition probabilities near 0 and 1
+    par[1:2] <- pmin(pmax(par[1:2],-100),100)
+    
+    goto.cnv <- logistic(par[1])
+    goto.normal <- logistic(par[2])
+    normal.state <- fx.par$normal.state
+    min.normal.stay <- .5
+    start.probs <- numeric(nstates)
+    if (goto.cnv < 1/(nstates-1)) {
+      start.probs[-normal.state] <- goto.cnv
+    } else {
+      start.probs[-normal.state] <- (1 - min.normal.stay)/(nstates-1)
+    }
+    start.probs[normal.state] <- 1 - sum(start.probs[-normal.state])
+    return(start.probs)
+  }
+  
+  
+  trFn <- function(par,fx.par,data,nstates) {
+    # this is a quick fix to cap transition probabilities near 0 and 1
+    par[1:2] <- pmin(pmax(par[1:2],-100),100)
+    
+    goto.cnv <- logistic(par[1])
+    goto.normal <- logistic(par[2])
+    normal.state <- fx.par$normal.state
+    min.normal.stay <- .5
+    A <- matrix(1e-8,ncol=nstates,nrow=nstates)
+    
+    for (i in 1:nstates) {
+      if (i != normal.state) {
+        if (i+1 <= nstates) {
+          A[i,i+1] <- goto.cnv
+        }
+        if (i-1 >= 1) {
+          A[i,i-1] <- goto.cnv
+        }
+        A[i,normal.state] <- goto.normal
+      }
+      if (i == normal.state) {
+        if (goto.cnv < 1/(nstates-1)) {
+          A[i,-i] <- goto.cnv
+        } else {
+          A[i,-i] <- (1 - min.normal.stay)/(nstates-1)
+        }
+      }
+      A[i,i] <- 1 - sum(A[i,-i])
+    }
+    return(A)
+  }
+  
+  
+  emFn <- function(par,fx.par,data,nstates) {
+    S <- fx.par$S
+    d <- fx.par$d
+    fit.var <- fx.par$fit.var
+    beta <- par[3:(2+ncol(data$X))]
+    mu <- exp(data$X %*% beta)
+    #mu[mu < 1] <- 1
+    if (!fit.var) {
+      phi <- exp(par[(3+ncol(data$X))])
+      phi <- max(1e-6,phi)
+      phi <- min(phi,1e4)
+    } else {
+      gamma <- par[(3+ncol(data$X)):length(par)]
+      phi <- exp(data$Y %*% gamma)
+      phi[phi < 1e-6] <- 1e-6
+      phi[phi > 1e4] <- 1e4
+    }
+    emit.probs <- t(sapply(1:nstates,function(j) dnbinom(data$O,mu=(mu*S[j]/d + ifelse(S[j]==0,1,0)),size=1/phi)))
+    return(emit.probs)
+  }
+  
+  negLogLike <- function(par,fx.par,data,nstates,stFn,trFn,emFn) {
+    start.probs <- stFn(par,fx.par,data,nstates)
+    A <- trFn(par,fx.par,data,nstates)
+    emit.probs <- emFn(par,fx.par,data,nstates)
+    T <- length(data$O)
+    if (length(start.probs) != nstates) {
+      stop("vector of starting probabilities not equal to number of states")
+    }
+    if (all(dim(A) != nstates)) {
+      stop("transition matrix must have the same number of rows and columns as number of states")
+    }
+    if ((nrow(emit.probs) != nstates) | (ncol(emit.probs) != T)) {
+      stop("emission probabilities matrix must have a row for each state and a column for each position")
+    }
+    negloglike.call <- .C("negloglike",tmax=as.integer(T),nstates=as.integer(nstates),start.probs=as.double(start.probs),A=as.double(A),emit.probs=as.double(emit.probs),alpha=double(nstates),alpha.new=double(nstates),nll=as.double(1))
+    return(negloglike.call$nll)
+  }
+  
+  viterbiPath <- function(par,fx.par,data,nstates,stFn,trFn,emFn) {
+    start.probs <- stFn(par,fx.par,data,nstates)
+    A <- trFn(par,fx.par,data,nstates)
+    emit.probs <- emFn(par,fx.par,data,nstates)
+    T <- length(data$O)
+    if (length(start.probs) != nstates) {
+      stop("vector of starting probabilities not equal to number of states")
+    }
+    if (all(dim(A) != nstates)) {
+      stop("transition matrix must have the same number of rows and columns as number of states")
+    }
+    if ((nrow(emit.probs) != nstates) | (ncol(emit.probs) != T)) {
+      stop("emission probabilities matrix must have a row for each state and a column for each position")
+    }
+    V <- matrix(0,nrow=nstates,ncol=T)
+    V.path <- matrix(0,nrow=nstates,ncol=T)
+    viterbi.call <- .C("viterbi",tmax=as.integer(T),nstates=as.integer(nstates),start.probs=as.double(start.probs),A=as.double(A),emit.probs=as.double(emit.probs),V=as.double(V),V.path=as.integer(V.path),path=as.integer(numeric(T)),trans.prob=as.double(numeric(nstates^2)),trans.prob.max=as.double(numeric(nstates)),trans.prob.whichmax=as.integer(numeric(nstates)))
+    return(viterbi.call$path + 1)
+  }
+  
+  logistic <- function(x) {
+    exp(x) / (1 + exp(x))
+  }
+  
+  logit <- function(x) {
+    log(x) - log(1-x)
+  }}
+  normal.state = which(S==d)
+  X <- as.matrix(mcols(gr)[,X.names,drop=FALSE])
+  colnames(X) <- X.names
+  if (fit.var) {
+    if (!(all(Y.names %in% colnames(mcols(gr))))) {
+      stop("Y.names must be metadata column names in gr")
+    }
+    Y <- as.matrix(mcols(gr)[,Y.names,drop=FALSE])
+    colnames(Y) <- Y.names
+  }
+  controls <- list(reltol=reltol,maxit=10000)
+  X.full <- cbind(intercept=rep(1,nrow(X)),scale(X))
+  lmfit <- lm(log(O+.1) ~ X.full + 0)
+  beta.hat <- lmfit$coefficients
+  names(beta.hat) <- colnames(X.full)
+  if (init.phi == "norm") {
+    phi.hat <- (var(O - exp(lmfit$fitted)) - mean(O))/mean(O)^2
+  } else if (init.phi == "counts") {
+    phi.hat <- (var(O)-mean(O))/mean(O)^2
+  }
+  phi.hat <- ifelse(phi.hat < 1e-6,1e-6,phi.hat)
+  init.par <- list(goto.cnv=goto.cnv,goto.normal=goto.normal,beta.hat=beta.hat,phi.hat=phi.hat)
+  fx.par <- list(S=S,d=d,normal.state=normal.state,fit.var=fit.var)
+  nstates <- length(S)
+  if (!fit.var) {
+    data <- list(O=O,X=X.full)
+    # added in this test if the loglikelihood is finite at initial setting
+    # otherwise, adjust the beta to simply the intercept
+    finite.test <- is.finite(negLogLike(c(logit(goto.cnv),logit(goto.normal),beta.hat,log(phi.hat)),fx.par,data,nstates,stFn,trFn,emFn))
+    if (!finite.test) {
+      beta.hat <- rep(0,length(beta.hat))
+      beta.hat[1] <- log(mean(data$O)+.1)
+    }
+    nm.fit <- optim(c(logit(goto.cnv),logit(goto.normal),beta.hat,log(phi.hat)),function(par) negLogLike(par,fx.par,data,nstates,stFn,trFn,emFn),method="Nelder-Mead",control=controls)
+  }else {
+    Y.full <- cbind(intercept=rep(1,nrow(Y)),scale(Y))
+    data <- list(O=O,X=X.full,Y=Y.full)
+    gamma.hat <- c(log(phi.hat),rep(0,ncol(Y)))
+    nm.fit <- optim(c(logit(goto.cnv),logit(goto.normal),beta.hat,gamma.hat),function(par) negLogLike(par,fx.par,data,nstates,stFn,trFn,emFn),method="Nelder-Mead",control=controls)
+  }
+  goto.cnv.hat <- logistic(nm.fit$par[1])
+  goto.normal.hat <- logistic(nm.fit$par[2])
+  A <- trFn(nm.fit$par[1:2],fx.par,data,nstates) 
+  beta.hat <- nm.fit$par[3:(2+ncol(X.full))]
+  names(beta.hat) <- colnames(X.full)
+  mu.hat <- exp(as.numeric(X.full %*% beta.hat))
+  
+  if (!fit.var) {
+    phi.hat <- exp(nm.fit$par[(3+ncol(X.full))])
+    gamma.hat <- NULL
+    type="exomeCopy"
+  }else {
+    gamma.hat <- nm.fit$par[(3+ncol(X.full)):length(nm.fit$par)]
+    names(gamma.hat) <- colnames(Y.full)
+    phi.hat <- exp(as.numeric(Y.full %*% gamma.hat))
+    phi.hat[phi.hat < 1e-6] <- 1e-6
+    type="exomeCopyVar"
+  }
+  path <- viterbiPath(nm.fit$par,fx.par,data,nstates,stFn,trFn,emFn)
+  emit.probs <- emFn(nm.fit$par,fx.par,data,nstates)
+  log.odds <- log(emit.probs[cbind(path,seq(path))]+1e-6) - log(emit.probs[normal.state,]+1e-6)
+  final.par <- list(goto.cnv=goto.cnv.hat,goto.normal=goto.normal.hat,beta=beta.hat,gamma=gamma.hat,phi=phi.hat)
+  fit <- new("ExomeCopy",sample.name=sample.name,type=type,path=Rle(path),ranges=granges(gr),O.norm=as.numeric(O/mu.hat),log.odds=log.odds,fx.par=fx.par,init.par=init.par,final.par=final.par,counts=nm.fit$counts,convergence=nm.fit$convergence,nll=nm.fit$value) 
+  return(fit)
+}
+
+
+
+exomeCopy <- function (gr=counts[seqnames(counts) == seq], sample.name="Ct1807_1113_20020702", X.names=c("log.bg","GC","GC.sq","width"), Y.names, fit.var = FALSE, 
+                       reltol = 1e-04, S=0:100,d=2, goto.cnv = 1e-04, goto.normal = 1/20, 
+                       init.phi = "norm"){
+  if (!sample.name %in% colnames(mcols(gr))) {
+    stop("sample.name is not a metadata column in gr.")
+  }
+  O <- mcols(gr)[[sample.name]]
+  if (any(O != round(O) | O < 0)) {
+    stop("Sample counts must be non-negative integers")
+  }
+  if (mean(O == 0) > 0.9) {
+    warning("More than 90% of sample counts are zero, exomeCopy will return NULL")
+    return(NULL)
+  }
+  if (any(S!=round(S)|S<0) | any(d!=round(d)|d<0)) {
+    stop("S and d must be non-negative integers")
+  }
+  if (!all(d %in% S)) {
+    stop("The normal state, d, must be one of the possible copy states in S")
+  } 
+  if (!(all(X.names %in% colnames(mcols(gr))))) {
+    stop("all X.names must be columns in gr")
+  }
+  # if (length(seqlevelsInUse(gr)) != 1) {
+  #   stop("The current gr argument has ranges over the following chromosomes: ",paste(seqlevelsInUse(gr),collapse=", "),".\n The gr argument should contain ranges over a single chromosome.\n You can pass exomeCopy a GRanges object with ranges from a single chromosome with this syntax: gr[seqnames(gr) == 'chr1'].\n See vignette for example of running on multiple chromosomes.")
+  # }
+  if (length(gr) < 100) {
+    warning("exomeCopy was tested for thousands of ranges covering a targeted region on a single chromosome.  The results might not be reliable for less than a hundred ranges.")
+  }
+  if (is.unsorted(gr)) {
+    stop("Genomic ranges in gr must be sorted.")
+  }
+  if(T){stFn <- function(par,fx.par,data,nstates) {
+    # this is a quick fix to cap transition probabilities near 0 and 1
+    par[1:2] <- pmin(pmax(par[1:2],-100),100)
+    
+    goto.cnv <- logistic(par[1])
+    goto.normal <- logistic(par[2])
+    normal.state <- fx.par$normal.state
+    min.normal.stay <- .5
+    start.probs <- numeric(nstates)
+    if (goto.cnv < 1/(nstates-1)) {
+      start.probs[-normal.state] <- goto.cnv
+    } else {
+      start.probs[-normal.state] <- (1 - min.normal.stay)/(nstates-1)
+    }
+    start.probs[normal.state] <- 1 - sum(start.probs[-normal.state])
+    return(start.probs)
+  }
+  
+  
+  trFn <- function(par,fx.par,data,nstates) {
+    # this is a quick fix to cap transition probabilities near 0 and 1
+    par[1:2] <- pmin(pmax(par[1:2],-100),100)
+    
+    goto.cnv <- logistic(par[1])
+    goto.normal <- logistic(par[2])
+    normal.state <- fx.par$normal.state
+    min.normal.stay <- .5
+    A <- matrix(1e-8,ncol=nstates,nrow=nstates)
+    
+    for (i in 1:nstates) {
+      if (i != normal.state) {
+        if (i+1 <= nstates) {
+          A[i,i+1] <- goto.cnv
+        }
+        if (i-1 >= 1) {
+          A[i,i-1] <- goto.cnv
+        }
+        A[i,normal.state] <- goto.normal
+      }
+      if (i == normal.state) {
+        if (goto.cnv < 1/(nstates-1)) {
+          A[i,-i] <- goto.cnv
+        } else {
+          A[i,-i] <- (1 - min.normal.stay)/(nstates-1)
+        }
+      }
+      A[i,i] <- 1 - sum(A[i,-i])
+    }
+    return(A)
+  }
+  
+  
+  emFn <- function(par,fx.par,data,nstates) {
+    S <- fx.par$S
+    d <- fx.par$d
+    fit.var <- fx.par$fit.var
+    beta <- par[3:(2+ncol(data$X))]
+    mu <- exp(data$X %*% beta)
+    #mu[mu < 1] <- 1
+    if (!fit.var) {
+      phi <- exp(par[(3+ncol(data$X))])
+      phi <- max(1e-6,phi)
+      phi <- min(phi,1e4)
+    } else {
+      gamma <- par[(3+ncol(data$X)):length(par)]
+      phi <- exp(data$Y %*% gamma)
+      phi[phi < 1e-6] <- 1e-6
+      phi[phi > 1e4] <- 1e4
+    }
+    emit.probs <- t(sapply(1:nstates,function(j) dnbinom(data$O,mu=(mu*S[j]/d + ifelse(S[j]==0,1,0)),size=1/phi)))
+    return(emit.probs)
+  }
+  
+  negLogLike <- function(par,fx.par,data,nstates,stFn,trFn,emFn) {
+    start.probs <- stFn(par,fx.par,data,nstates)
+    A <- trFn(par,fx.par,data,nstates)
+    emit.probs <- emFn(par,fx.par,data,nstates)
+    T <- length(data$O)
+    if (length(start.probs) != nstates) {
+      stop("vector of starting probabilities not equal to number of states")
+    }
+    if (all(dim(A) != nstates)) {
+      stop("transition matrix must have the same number of rows and columns as number of states")
+    }
+    if ((nrow(emit.probs) != nstates) | (ncol(emit.probs) != T)) {
+      stop("emission probabilities matrix must have a row for each state and a column for each position")
+    }
+    negloglike.call <- .C("negloglike",tmax=as.integer(T),nstates=as.integer(nstates),start.probs=as.double(start.probs),A=as.double(A),emit.probs=as.double(emit.probs),alpha=double(nstates),alpha.new=double(nstates),nll=as.double(1))
+    return(negloglike.call$nll)
+  }
+  
+  viterbiPath <- function(par,fx.par,data,nstates,stFn,trFn,emFn) {
+    start.probs <- stFn(par,fx.par,data,nstates)
+    A <- trFn(par,fx.par,data,nstates)
+    emit.probs <- emFn(par,fx.par,data,nstates)
+    T <- length(data$O)
+    if (length(start.probs) != nstates) {
+      stop("vector of starting probabilities not equal to number of states")
+    }
+    if (all(dim(A) != nstates)) {
+      stop("transition matrix must have the same number of rows and columns as number of states")
+    }
+    if ((nrow(emit.probs) != nstates) | (ncol(emit.probs) != T)) {
+      stop("emission probabilities matrix must have a row for each state and a column for each position")
+    }
+    V <- matrix(0,nrow=nstates,ncol=T)
+    V.path <- matrix(0,nrow=nstates,ncol=T)
+    viterbi.call <- .C("viterbi",tmax=as.integer(T),nstates=as.integer(nstates),start.probs=as.double(start.probs),A=as.double(A),emit.probs=as.double(emit.probs),V=as.double(V),V.path=as.integer(V.path),path=as.integer(numeric(T)),trans.prob=as.double(numeric(nstates^2)),trans.prob.max=as.double(numeric(nstates)),trans.prob.whichmax=as.integer(numeric(nstates)))
+    return(viterbi.call$path + 1)
+  }
+  
+  logistic <- function(x) {
+    exp(x) / (1 + exp(x))
+  }
+  
+  logit <- function(x) {
+    log(x) - log(1-x)
+  }}
+  normal.state = which(S==d)
+  X <- as.matrix(mcols(gr)[,X.names,drop=FALSE])
+  colnames(X) <- X.names
+  if (fit.var) {
+    if (!(all(Y.names %in% colnames(mcols(gr))))) {
+      stop("Y.names must be metadata column names in gr")
+    }
+    Y <- as.matrix(mcols(gr)[,Y.names,drop=FALSE])
+    colnames(Y) <- Y.names
+  }
+  controls <- list(reltol=reltol,maxit=10000)
+  X.full <- cbind(intercept=rep(1,nrow(X)),scale(X))
+  lmfit <- lm(log(O+.1) ~ X.full + 0)
+  beta.hat <- lmfit$coefficients
+  names(beta.hat) <- colnames(X.full)
+  if (init.phi == "norm") {
+    phi.hat <- (var(O - exp(lmfit$fitted)) - mean(O))/mean(O)^2
+  } else if (init.phi == "counts") {
+    phi.hat <- (var(O)-mean(O))/mean(O)^2
+  }
+  phi.hat <- ifelse(phi.hat < 1e-6,1e-6,phi.hat)
+  init.par <- list(goto.cnv=goto.cnv,goto.normal=goto.normal,beta.hat=beta.hat,phi.hat=phi.hat)
+  fx.par <- list(S=S,d=d,normal.state=normal.state,fit.var=fit.var)
+  nstates <- length(S)
+  if (!fit.var) {
+    data <- list(O=O,X=X.full)
+    # added in this test if the loglikelihood is finite at initial setting
+    # otherwise, adjust the beta to simply the intercept
+    finite.test <- is.finite(negLogLike(c(logit(goto.cnv),logit(goto.normal),beta.hat,log(phi.hat)),fx.par,data,nstates,stFn,trFn,emFn))
+    if (!finite.test) {
+      beta.hat <- rep(0,length(beta.hat))
+      beta.hat[1] <- log(mean(data$O)+.1)
+    }
+    nm.fit <- optim(c(logit(goto.cnv),logit(goto.normal),beta.hat,log(phi.hat)),function(par) negLogLike(par,fx.par,data,nstates,stFn,trFn,emFn),method="Nelder-Mead",control=controls)
+  }else {
+    Y.full <- cbind(intercept=rep(1,nrow(Y)),scale(Y))
+    data <- list(O=O,X=X.full,Y=Y.full)
+    gamma.hat <- c(log(phi.hat),rep(0,ncol(Y)))
+    nm.fit <- optim(c(logit(goto.cnv),logit(goto.normal),beta.hat,gamma.hat),function(par) negLogLike(par,fx.par,data,nstates,stFn,trFn,emFn),method="Nelder-Mead",control=controls)
+  }
+  goto.cnv.hat <- logistic(nm.fit$par[1])
+  goto.normal.hat <- logistic(nm.fit$par[2])
+  A <- trFn(nm.fit$par[1:2],fx.par,data,nstates) 
+  beta.hat <- nm.fit$par[3:(2+ncol(X.full))]
+  names(beta.hat) <- colnames(X.full)
+  mu.hat <- exp(as.numeric(X.full %*% beta.hat))
+  
+  if (!fit.var) {
+    phi.hat <- exp(nm.fit$par[(3+ncol(X.full))])
+    gamma.hat <- NULL
+    type="exomeCopy"
+  }else {
+    gamma.hat <- nm.fit$par[(3+ncol(X.full)):length(nm.fit$par)]
+    names(gamma.hat) <- colnames(Y.full)
+    phi.hat <- exp(as.numeric(Y.full %*% gamma.hat))
+    phi.hat[phi.hat < 1e-6] <- 1e-6
+    type="exomeCopyVar"
+  }
+  path <- viterbiPath(nm.fit$par,fx.par,data,nstates,stFn,trFn,emFn)
+  emit.probs <- emFn(nm.fit$par,fx.par,data,nstates)
+  log.odds <- log(emit.probs[cbind(path,seq(path))]+1e-6) - log(emit.probs[normal.state,]+1e-6)
+  final.par <- list(goto.cnv=goto.cnv.hat,goto.normal=goto.normal.hat,beta=beta.hat,gamma=gamma.hat,phi=phi.hat)
+  fit <- new("ExomeCopy",sample.name=sample.name,type=type,path=Rle(path),ranges=granges(gr),O.norm=as.numeric(O/mu.hat),log.odds=log.odds,fx.par=fx.par,init.par=init.par,final.par=final.par,counts=nm.fit$counts,convergence=nm.fit$convergence,nll=nm.fit$value) 
+  return(fit)
+}

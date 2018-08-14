@@ -1,0 +1,35 @@
+---
+title: "Packt_machine_learning_R"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Step 1 – 收集数据
+```{bash eval=FALSE, include=FALSE}
+wget https://raw.githubusercontent.com/stedy/Machine-Learning-with-R-datasets/master/mushrooms.csv
+```
+
+## Step 2 – 探索和准备数据
+
+数据集中22个特征属性和目标分类均是名义变量，需要指定`stringsAsFactors=TRUE`，将数据转换成因子：
+
+
+```{r echo=T}
+  mushrooms <- read.csv("/home/wqh/mushrooms.csv", stringsAsFactors = TRUE)
+  str(mushrooms)
+```
+
+可以发现veil_type属性只有一个分类，原本药典中记载的这个特征有两个分类p(partial) OR u(universal),但是我们的样本数据集中均是p(partial)，对预测分类没有提供什么有用的信息，后面将舍弃这个属性：
+```{r}
+  mushrooms$veil_type = NULL
+```
+  统计mushroom分类的类型：
+```{r}
+table(mushrooms$type)
+```
+
+
+
